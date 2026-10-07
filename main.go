@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	yaml "gopkg.in/yaml.v3"
@@ -101,6 +102,9 @@ type Parameter struct {
 	Validate bool
 	Readme   bool
 	Schema   bool
+
+	// RawValue is the YAML subtree of a param without its own leaf (e.g. an [array] of objects), for the schema
+	RawValue interface{}
 }
 
 func NewParameter(name string) *Parameter {
@@ -237,14 +241,20 @@ func loadConfig(path string) (*Config, error) {
 // YAML utilities – flatten structures into dot notation «key», arrays as key[0]
 //-------------------------------------------------------------------------
 
+// flatValue is a flattened YAML leaf; schema is false when a key in its path contains a dot.
+type flatValue struct {
+	value  interface{}
+	schema bool
+}
+
 // flattenYAML flattens nested YAML to dot-notation keys (a.b[0].c)
-func flattenYAML(prefix string, in interface{}, out map[string]interface{}) {
+func flattenYAML(prefix string, in interface{}, out map[string]flatValue, schema bool) {
 	switch v := in.(type) {
 
 	case map[string]interface{}:
 		if len(v) == 0 {
 			if prefix != "" {
-				out[prefix] = v
+				out[prefix] = flatValue{v, schema}
 			}
 			return
 		}
@@ -253,60 +263,76 @@ func flattenYAML(prefix string, in interface{}, out map[string]interface{}) {
 			if prefix != "" {
 				key = prefix + "." + k
 			}
-			flattenYAML(key, val, out)
+			// Dotted keys (e.g. prometheus.io/scrape) can't be split back into a tree, keep them out of the schema
+			flattenYAML(key, val, out, schema && !strings.Contains(k, "."))
 		}
 
 	case []interface{}:
-		if len(v) == 0 {
+		if len(v) == 0 || isPlainArray(v) {
 			if prefix != "" {
-				out[prefix] = v
+				out[prefix] = flatValue{v, schema}
 			}
 			return
 		}
 		for i, val := range v {
 			key := fmt.Sprintf("%s[%d]", prefix, i)
-			flattenYAML(key, val, out)
+			flattenYAML(key, val, out, schema)
 		}
 
 	default:
-		out[prefix] = v
+		out[prefix] = flatValue{v, schema}
 	}
+}
+
+// isPlainArray reports whether all elements are strings; such arrays are documented as a single key.
+func isPlainArray(arr []interface{}) bool {
+	for _, e := range arr {
+		if _, ok := e.(string); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 //-------------------------------------------------------------------------
 // createValuesObject – converts YAML to []*Parameter with value & type info
 //-------------------------------------------------------------------------
 
-func createValuesObject(valuesPath string) ([]*Parameter, error) {
+func createValuesObject(valuesPath string) ([]*Parameter, interface{}, error) {
 	raw, err := ioutil.ReadFile(valuesPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var node interface{}
 	if err := yaml.Unmarshal(raw, &node); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	m := map[string]interface{}{}
-	flattenYAML("", node, m)
+	m := map[string]flatValue{}
+	flattenYAML("", node, m, true)
 
 	// Build parameters
 	params := []*Parameter{}
-	for path, val := range m {
+	for path, fv := range m {
 		p := NewParameter(path)
-		p.Value = val
-		p.Type = inferType(val)
+		p.Value = fv.value
+		// YAML null is rendered as Go's "nil"
+		if fv.value == nil {
+			p.Value = "nil"
+		}
+		p.Type = inferType(fv.value)
+		p.Schema = fv.schema
 		params = append(params, p)
 	}
 	// Sort for deterministic output
 	sort.Slice(params, func(i, j int) bool { return params[i].Name < params[j].Name })
-	return params, nil
+	return params, node, nil
 }
 
 func inferType(v interface{}) string {
 	switch v.(type) {
 	case nil:
-		return "nil"
+		return "object" // matches JS typeof null
 	case string:
 		return "string"
 	case bool:
@@ -558,6 +584,49 @@ func combineMetadataAndValues(values []*Parameter, meta []*Parameter) {
 	}
 }
 
+// setRawValues stores the YAML subtree for modifier params that have no leaf of their own.
+func setRawValues(meta []*Parameter, root interface{}) {
+	for _, p := range meta {
+		if p.Value == nil && len(p.Modifiers) > 0 && !p.Extra() {
+			if v, ok := lookupPath(root, p.Name); ok {
+				p.RawValue = v
+			}
+		}
+	}
+}
+
+var pathSegmentRe = regexp.MustCompile(`^([^\[]*)((?:\[\d+\])*)$`)
+var pathIndexRe = regexp.MustCompile(`\[(\d+)\]`)
+
+// lookupPath resolves a dot-notation path like a.b[0].c; dotted keys aren't supported.
+func lookupPath(node interface{}, path string) (interface{}, bool) {
+	cur := node
+	for _, seg := range strings.Split(path, ".") {
+		m := pathSegmentRe.FindStringSubmatch(seg)
+		if m == nil {
+			return nil, false
+		}
+		if m[1] != "" {
+			obj, ok := cur.(map[string]interface{})
+			if !ok {
+				return nil, false
+			}
+			if cur, ok = obj[m[1]]; !ok {
+				return nil, false
+			}
+		}
+		for _, idx := range pathIndexRe.FindAllStringSubmatch(m[2], -1) {
+			arr, ok := cur.([]interface{})
+			i, _ := strconv.Atoi(idx[1])
+			if !ok || i >= len(arr) {
+				return nil, false
+			}
+			cur = arr[i]
+		}
+	}
+	return cur, true
+}
+
 // applyModifiers only needs array/object/string/nullable/default for README/schema rendering.
 func applyModifiers(p *Parameter, cfg *Config) {
 	if len(p.Modifiers) == 0 {
@@ -597,14 +666,46 @@ func applyModifiers(p *Parameter, cfg *Config) {
 	}
 }
 
-func buildParamsToRender(list []*Parameter, cfg *Config) []*Parameter {
+// applySchemaModifiers sets types from modifiers but keeps the real YAML value; README placeholders are
+// only used when the key has no value. [default: X] still overrides.
+func applySchemaModifiers(p *Parameter, cfg *Config) {
+	var placeholder interface{}
+	for _, m := range p.Modifiers {
+		switch m {
+		case cfg.Modifiers.Array:
+			p.Type, placeholder = "array", []interface{}{}
+		case cfg.Modifiers.Object:
+			p.Type, placeholder = "object", map[string]interface{}{}
+		case cfg.Modifiers.String:
+			p.Type, placeholder = "string", ""
+		default:
+			if strings.HasPrefix(m, cfg.Modifiers.Default+":") {
+				p.Value = strings.TrimSpace(strings.TrimPrefix(m, cfg.Modifiers.Default+":"))
+			}
+		}
+	}
+	if p.Value == nil {
+		p.Value = p.RawValue
+	}
+	if p.Value == nil {
+		if p.HasModifier(cfg.Modifiers.Nullable) {
+			p.Value = "nil"
+		} else {
+			p.Value = placeholder
+		}
+	}
+}
+
+// buildParamsToRender returns modified copies of the non-skipped params, leaving list untouched.
+func buildParamsToRender(list []*Parameter, cfg *Config, apply func(*Parameter, *Config)) []*Parameter {
 	out := []*Parameter{}
 	for _, p := range list {
 		if p.Skip() {
 			continue
 		}
-		applyModifiers(p, cfg)
-		out = append(out, p)
+		c := *p
+		apply(&c, cfg)
+		out = append(out, &c)
 	}
 	return out
 }
@@ -627,8 +728,7 @@ func markdownTable(params []*Parameter) string {
 					val = fmt.Sprintf("`%s`", vv)
 				}
 			default:
-				b, _ := json.Marshal(vv)
-				val = fmt.Sprintf("`%s`", string(b))
+				val = fmt.Sprintf("`%s`", jsonString(vv))
 			}
 		}
 		rows = append(rows, []string{
@@ -671,6 +771,15 @@ func markdownTable(params []*Parameter) string {
 	return b.String()
 }
 
+// jsonString encodes v like JS JSON.stringify, without escaping <, > and &.
+func jsonString(v interface{}) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
 func renderSection(sec *Section, h string) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("%s %s\n\n", h, sec.Name))
@@ -701,7 +810,7 @@ func insertReadmeTable(readmePath string, sections []*Section, cfg *Config) erro
 	if err != nil {
 		return err
 	}
-	lines := strings.Split(string(raw), "\n")
+	lines := newlineRe.Split(string(raw), -1)
 
 	// Find start of parameters section (level ##+ heading matching cfg.Regexp.ParamsSectionTitle)
 	start := -1
@@ -729,80 +838,197 @@ func insertReadmeTable(readmePath string, sections []*Section, cfg *Config) erro
 		}
 	}
 
-	// Trim trailing existing table lines (just replicate JS logic quickly)
-	// For simplicity we remove everything between start and end and insert fresh.
+	// Replace up to the last table-like line (plus the blank line after it), keeping any text below the tables.
+	// Without a table, only the line right after the header is replaced.
+	replaceEnd := start + 1
+	for i := end - 1; i >= start; i-- {
+		if lines[i] != "" && !isTextLine(lines[i]) {
+			replaceEnd = i + 2
+			break
+		}
+	}
+	if replaceEnd > len(lines) {
+		replaceEnd = len(lines)
+	}
+
 	newTable := renderReadmeTable(sections, hPrefix)
 	newLines := append([]string{}, lines[:start]...)
 	newLines = append(newLines, strings.Split(newTable, "\n")...)
-	newLines = append(newLines, lines[end:]...)
+	newLines = append(newLines, lines[replaceEnd:]...)
 
 	return ioutil.WriteFile(readmePath, []byte(strings.Join(newLines, "\n")), 0644)
+}
+
+var newlineRe = regexp.MustCompile(`\r?\n`)
+
+// isTextLine reports whether a line is prose rather than a table row or a heading.
+func isTextLine(line string) bool {
+	if strings.Contains(line, "|") {
+		return false
+	}
+	if i := strings.IndexByte(line, '#'); i >= 0 {
+		line = line[:i]
+	}
+	return strings.TrimSpace(line) != ""
 }
 
 //-------------------------------------------------------------------------
 // OpenAPI Schema – minimal implementation (object graph with default values)
 //-------------------------------------------------------------------------
 
-type schemaObject map[string]interface{}
-
-type schemaGenerator struct {
-	root schemaObject
+// schemaNode is a JSON object that keeps keys in insertion order, matching the Node.js output.
+type schemaNode struct {
+	keys []string
+	vals map[string]interface{}
 }
 
-func newSchemaGenerator() *schemaGenerator {
-	return &schemaGenerator{root: schemaObject{"title": "Chart Values", "type": "object", "properties": schemaObject{}}}
-}
-
-func (s *schemaGenerator) add(param *Parameter) {
-	if param.Extra() || !param.Schema || param.HasModifier("object") {
-		return
+// newNode builds a node from alternating key/value pairs.
+func newNode(kv ...interface{}) *schemaNode {
+	n := &schemaNode{vals: map[string]interface{}{}}
+	for i := 0; i+1 < len(kv); i += 2 {
+		n.set(kv[i].(string), kv[i+1])
 	}
+	return n
+}
 
-	parts := strings.Split(param.Name, ".")
-	cur := s.root["properties"].(schemaObject)
+// set adds or replaces a key; a replaced key keeps its original position, like a JS object.
+func (n *schemaNode) set(k string, v interface{}) {
+	if _, ok := n.vals[k]; !ok {
+		n.keys = append(n.keys, k)
+	}
+	n.vals[k] = v
+}
 
-	for i, part := range parts {
-		last := i == len(parts)-1
-		if last {
-			obj := schemaObject{
-				"type":        param.Type,
-				"description": param.Description,
-				"default":     param.Value,
+// child returns the node stored at k, if any.
+func (n *schemaNode) child(k string) (*schemaNode, bool) {
+	c, ok := n.vals[k].(*schemaNode)
+	return c, ok
+}
+
+func (n *schemaNode) MarshalJSON() ([]byte, error) {
+	var b strings.Builder
+	b.WriteString("{")
+	for i, k := range n.keys {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(jsonString(k))
+		b.WriteString(":")
+		b.WriteString(jsonString(n.vals[k]))
+	}
+	b.WriteString("}")
+	return []byte(b.String()), nil
+}
+
+// arrayKeyRe matches a path component indexing an array of objects, e.g. jobs[0]
+var arrayKeyRe = regexp.MustCompile(`^(.+)\[.+\]$`)
+
+// addSchema writes the schema for param along tree (its dot-split name) into props.
+// Inside arrays of objects the item defaults are ignored.
+func addSchema(param *Parameter, tree []string, props *schemaNode, ignoreDefault bool, cfg *Config) error {
+	for i, part := range tree {
+		if i == len(tree)-1 {
+			nullable := param.HasModifier(cfg.Modifiers.Nullable)
+			var typ interface{} = param.Type
+			if nullable && param.Type != "" {
+				// Helm validates with JSON Schema, which ignores OpenAPI's nullable keyword
+				typ = []string{param.Type, "null"}
 			}
-			if param.HasModifier("nullable") {
-				obj["nullable"] = true
+			obj := newNode("type", typ, "description", param.Description)
+			if !ignoreDefault {
+				obj.set("default", schemaDefault(param.Value))
+			}
+			if nullable {
+				obj.set("nullable", true)
 			}
 			if param.Type == "array" {
-				schemaObj := schemaObject{}
-				elemType := ""
+				items := newNode()
 				if arr, ok := param.Value.([]interface{}); ok && len(arr) > 0 {
-					elemType = inferType(arr[0])
+					items.set("type", inferType(arr[0]))
 				}
-				if elemType != "" {
-					schemaObj["type"] = elemType
-				}
-				obj["items"] = schemaObj
+				obj.set("items", items)
 			}
-			cur[part] = obj
-		} else {
-			if _, ok := cur[part]; !ok {
-				cur[part] = schemaObject{
-					"type":       "object",
-					"properties": schemaObject{},
-				}
-			}
-			cur = cur[part].(schemaObject)["properties"].(schemaObject)
+			props.set(part, obj)
+			return nil
 		}
+
+		if m := arrayKeyRe.FindStringSubmatch(part); m != nil {
+			key := m[1]
+			if _, ok := props.vals[key]; !ok {
+				props.set(key, newNode(
+					"type", "array",
+					"description", param.Description,
+					"items", newNode("type", "object", "properties", newNode()),
+				))
+			}
+			var itemProps *schemaNode
+			arr, ok := props.child(key)
+			if ok {
+				if items, ok := arr.child("items"); ok {
+					itemProps, ok = items.child("properties")
+				}
+			}
+			if itemProps == nil {
+				return fmt.Errorf("conflicting schema definitions for %s", param.Name)
+			}
+			return addSchema(param, tree[i+1:], itemProps, true, cfg)
+		}
+
+		if _, ok := props.vals[part]; !ok {
+			props.set(part, newNode("type", "object", "properties", newNode()))
+		}
+		var next *schemaNode
+		if obj, ok := props.child(part); ok {
+			next, _ = obj.child("properties")
+		}
+		if next == nil {
+			return fmt.Errorf("conflicting schema definitions for %s", param.Name)
+		}
+		props = next
 	}
+	return nil
 }
 
-func renderOpenAPISchema(path string, params []*Parameter) error {
-	gen := newSchemaGenerator()
-	for _, p := range params {
-		gen.add(p)
+// schemaDefault maps the "nil" and "null" placeholders to JSON null.
+func schemaDefault(v interface{}) interface{} {
+	if v == "nil" || v == "null" {
+		return nil
 	}
-	data, _ := json.MarshalIndent(gen.root, "", "    ")
-	return ioutil.WriteFile(path, data, 0644)
+	return v
+}
+
+func renderOpenAPISchema(path string, params []*Parameter, cfg *Config) error {
+	var nils []string
+	for _, p := range params {
+		if p.Value == "nil" && !p.HasModifier(cfg.Modifiers.Nullable) {
+			nils = append(nils, p.Name)
+		}
+	}
+	if len(nils) > 0 {
+		return fmt.Errorf("invalid type 'nil' for the following values: %s", strings.Join(nils, ", "))
+	}
+
+	props := newNode()
+	root := newNode("title", "Chart Values", "type", "object", "properties", props)
+	for _, p := range params {
+		// Object modifier entries are README-only; params without a value only exist in the metadata
+		if p.Extra() || !p.Schema || p.HasModifier(cfg.Modifiers.Object) || p.Value == nil {
+			continue
+		}
+		if err := addSchema(p, strings.Split(p.Name, "."), props, false, cfg); err != nil {
+			return err
+		}
+	}
+
+	// Indent like JSON.stringify(schema, null, 4): no HTML escaping, no trailing newline
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "    ")
+	if err := enc.Encode(root); err != nil {
+		return err
+	}
+	return ioutil.WriteFile(path, []byte(strings.TrimSuffix(b.String(), "\n")), 0644)
 }
 
 //-------------------------------------------------------------------------
@@ -810,7 +1036,7 @@ func renderOpenAPISchema(path string, params []*Parameter) error {
 //-------------------------------------------------------------------------
 
 func getParsedMetadata(valuesPath string, cfg *Config) (*Metadata, error) {
-	valuesObj, err := createValuesObject(valuesPath)
+	valuesObj, root, err := createValuesObject(valuesPath)
 	if err != nil {
 		return nil, err
 	}
@@ -822,6 +1048,7 @@ func getParsedMetadata(valuesPath string, cfg *Config) (*Metadata, error) {
 		return nil, err
 	}
 	combineMetadataAndValues(valuesObj, meta.Parameters)
+	setRawValues(meta.Parameters, root)
 	return meta, nil
 }
 
@@ -847,7 +1074,7 @@ func runReadmeGenerator(opts *options) error {
 
 	if opts.readmePath != "" {
 		for _, sec := range meta.Sections {
-			sec.Parameters = buildParamsToRender(sec.Parameters, cfg)
+			sec.Parameters = buildParamsToRender(sec.Parameters, cfg, applyModifiers)
 		}
 		if err := insertReadmeTable(opts.readmePath, meta.Sections, cfg); err != nil {
 			return err
@@ -856,8 +1083,8 @@ func runReadmeGenerator(opts *options) error {
 	}
 
 	if opts.schemaPath != "" {
-		meta.Parameters = buildParamsToRender(meta.Parameters, cfg)
-		if err := renderOpenAPISchema(opts.schemaPath, meta.Parameters); err != nil {
+		meta.Parameters = buildParamsToRender(meta.Parameters, cfg, applySchemaModifiers)
+		if err := renderOpenAPISchema(opts.schemaPath, meta.Parameters, cfg); err != nil {
 			return err
 		}
 		fmt.Println("Schema generated ✅")

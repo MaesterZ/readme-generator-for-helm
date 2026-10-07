@@ -99,13 +99,13 @@ The comment syntax, tags and modifiers are preserved from the original project:
 
 Supported modifiers (customisable via the config file):
 
-| Modifier        | Effect                                       |
-| --------------- | -------------------------------------------- |
-| `array`         | Treat parameter as array, default `[]`       |
-| `object`        | Treat parameter as object, default `{}`      |
-| `string`        | Force empty string default `""`              |
-| `nullable`      | Parameter may be `null`; default stays as‑is |
-| `default:VALUE` | Override default with given literal `VALUE`  |
+| Modifier        | Effect                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------ |
+| `array`         | Treat parameter as array; README shows `[]`, schema keeps the real default                 |
+| `object`        | Treat parameter as object; README shows `{}`, left out of the schema                       |
+| `string`        | Treat parameter as string; README shows `""`, schema keeps the real default                |
+| `nullable`      | Parameter may be `null`; schema type becomes `[<type>, "null"]` and `nullable: true` is set |
+| `default:VALUE` | Override the default with the literal `VALUE` in both README and schema                    |
 
 > **Important:** Ordering of tags in the YAML file does not matter, *except* for `@section`, which groups all subsequent `@param`s until the next `@section`.
 
