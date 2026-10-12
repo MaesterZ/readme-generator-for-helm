@@ -1,0 +1,53 @@
+---
+version: "2"
+linters:
+  default: all
+  enable:
+    - gomodguard_v2
+  disable:
+    - depguard
+    - exhaustruct
+    - exhaustruct_v5
+    - forbidigo
+    - funlen
+    - gochecknoglobals
+    - gochecknoinits
+    - godot
+    - gomodguard
+    - lll
+    - nlreturn
+    - prealloc
+    - whitespace
+    - wsl
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Repeated literals in test tables are clearer than shared constants
+      - path: _test\.go
+        linters:
+          - goconst
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+  settings:
+    wsl_v5:
+      allow-first-in-block: true
+      allow-whole-block: false
+      branch-max-lines: 2
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

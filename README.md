@@ -44,7 +44,7 @@ The top‑level heading (`## Parameters`, `### Parameters`, …) is detected d
 
 ## Requirements
 
-* Go **1.22+** (any platform supported by Go)
+* Go **1.27+** (any platform supported by Go)
 
 ---
 
@@ -74,19 +74,21 @@ go build -o readme-generator-for-helm
 
 ## Basic usage
 
+Run it without arguments (or with `-h`) to print the help:
+
 ```console
-readme-generator-for-helm [options]
+Usage: readme-generator-for-helm [options]
 
 Options:
   -v, --values  <file>   Path to the values.yaml file (required)
   -r, --readme  <file>   Path to the README.md file to update
-  -c, --config  <file>   Path to config.json (optional; built‑in defaults if omitted)
+  -c, --config  <file>   Path to config.json (optional; built-in defaults if omitted)
   -s, --schema  <file>   Path for the generated OpenAPI Schema
       --version          Print program version and exit
   -h, --help             Show help
-```
 
-*At least one of* `--readme` *or* `--schema` *must be provided.*
+At least one of --readme or --schema must be provided.
+```
 
 ---
 

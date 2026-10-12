@@ -7,10 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Brings the Go rewrite to parity with the Node.js
-[readme-generator-for-helm](https://github.com/bitnami/readme-generator-for-helm) on its own test fixtures:
-README output is now byte-identical, and the schema is identical except for the intentional
-differences listed under **Changed**.
+First release of the fork. The Go rewrite reaches parity with the Node.js
+[readme-generator-for-helm](https://github.com/bitnami/readme-generator-for-helm) on its own test fixtures
+(README output is byte-identical; the schema differs only as listed under **Changed**), produces schemas
+that Helm 3 and 4 accept, and passes golangci-lint with no issues.
+
+### Added
+
+- Running without arguments prints the help and exits 0, as `-h` / `--help` do; the help text
+  matches the README. Unknown flags print the error and the help to stderr and exit 2.
+- golangci-lint configuration (`.golangci.yml`): all linters enabled, minus a short disable list.
+- `Makefile` with `build`, `release`, `test`, `lint`, `format`, `tidy` and `clean` targets, and a
+  `.gitignore` for the binary and editor files.
+- Golden tests using the Node.js README fixtures, a schema golden file, and unit tests for each fix.
 
 ### Fixed
 
@@ -29,10 +38,14 @@ differences listed under **Changed**.
   `type: object` instead of the invalid `type: nil`.
 - Schema keys follow the order of the `values.yaml` metadata (and `type`, `description`,
   `default`, ... within each entry) instead of being sorted alphabetically.
-- `<`, `>` and `&` are no longer escaped as `<` etc. in the schema and README values.
+- `<`, `>` and `&` are no longer escaped as `\u003c` etc. in the schema and README values.
 - The schema honours custom `object` and `nullable` modifier names from the config file.
 - README modifiers no longer leak into the schema, since both are now built from separate copies
   of the parameters.
+- Values that JSON can't represent (YAML `.inf`, `.nan`) fail with an error instead of silently
+  rendering an empty README cell.
+- An invalid `paramsSectionTitle` regexp in the config file is reported as an error instead of
+  crashing.
 
 ### Changed
 
@@ -41,6 +54,8 @@ differences listed under **Changed**.
   and the upstream no longer takes changes. The Go module path is now
   `github.com/MaesterZ/readme-generator-for-helm`, so install with
   `go install github.com/MaesterZ/readme-generator-for-helm@latest`.
+- Require Go 1.27 and switch from the archived `gopkg.in/yaml.v3` to its maintained successor
+  `go.yaml.in/yaml/v3` (v3.0.5, same API).
 - The schema `default` for parameters with the `array` or `string` modifier is the real value from
   `values.yaml`; the README still shows the `[]` / `""` placeholder. The Node.js version writes
   the placeholders as strings (`"[]"`, `"\"\""`) and derives `items.type` from them, which makes
@@ -48,6 +63,13 @@ differences listed under **Changed**.
 - Nullable parameters get `"type": ["<type>", "null"]` in the schema. Helm validates
   `values.schema.json` as JSON Schema, which ignores OpenAPI's `nullable` keyword, so `null` values
   previously failed `helm lint`. `nullable: true` is still emitted for OpenAPI consumers.
+- Error messages say which step failed, e.g. `read values: open values.yaml: no such file or directory`.
+- Fixed all 294 golangci-lint findings, with no change to the generated README or schema:
+  - errors are named or wrapped with context, and JSON encoding errors are no longer ignored;
+  - the long parsing, rendering and schema functions are split into small helpers, and the
+    README and schema modifier logic is shared instead of duplicated;
+  - `io/ioutil` is replaced by `os`, and `interface{}` by `any`;
+  - tests run in parallel (`t.Parallel()`) and pass with `-race`.
 
 ## [1.0.1] - 2026-03-30
 
