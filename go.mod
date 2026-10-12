@@ -1,4 +1,4 @@
-module github.com/cozystack/readme-generator-for-helm
+module github.com/MaesterZ/readme-generator-for-helm
 
 go 1.24.0
 

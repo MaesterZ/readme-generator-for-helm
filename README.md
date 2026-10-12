@@ -1,5 +1,7 @@
 # Readme Generator for Helm (Go)
 
+Cozystack stopped using this generator in [#1218](https://github.com/cozystack/cozystack/pull/1218) and moved to [cozyvalues-gen](https://github.com/cozystack/cozyvalues-gen), the upstream is not taking changes here anymore.
+
 > **Go port of [`bitnami/readme-generator-for-helm`](https://github.com/bitnami/readme-generator-for-helm)**
 >
 > Drop‑in replacement that keeps the same CLI **and metadata syntax**, but ships as a single statically‑linked Go binary.
@@ -51,19 +53,19 @@ The top‑level heading (`## Parameters`, `### Parameters`, …) is detected d
 ### Using `go install` (recommended)
 
 ```console
-go install github.com/cozystack/readme-generator-for-helm@latest
+go install github.com/MaesterZ/readme-generator-for-helm@latest
 ```
 
 The binary lands in `$(go env GOPATH)/bin` (usually `~/go/bin`). Make sure that directory is on your `$PATH`.
 
 ### Download a pre‑built release binary
 
-Head over to [https://github.com/cozystack/readme-generator-for-helm/releases](https://github.com/cozystack/readme-generator-for-helm/releases), grab the archive for your OS/arch, unpack it somewhere on your `$PATH`.
+Head over to [https://github.com/MaesterZ/readme-generator-for-helm/releases](https://github.com/MaesterZ/readme-generator-for-helm/releases), grab the archive for your OS/arch, unpack it somewhere on your `$PATH`.
 
 ### Build from source
 
 ```console
-git clone https://github.com/cozystack/readme-generator-for-helm
+git clone https://github.com/MaesterZ/readme-generator-for-helm
 cd readme-generator-for-helm
 go build -o readme-generator-for-helm
 ```
@@ -143,5 +145,17 @@ Omit the flag entirely to use the built‑in defaults (same as above).
 
 ## License
 
-Apache License 2.0 © 2025 Cozystack.
-Portions of the code are adapted from the original Bitnami implementation.
+Copyright &copy; 2026 MaesterZ (fork modifications)<br>
+Copyright &copy; 2025 Cozystack (Go port)<br>
+Copyright &copy; 2025 Broadcom. The term "Broadcom" refers to Broadcom Inc. and/or its subsidiaries
+([original Node.js implementation](https://github.com/bitnami/readme-generator-for-helm) by Bitnami).
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+See [CHANGELOG.md](CHANGELOG.md) for the changes made in this fork.

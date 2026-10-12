@@ -36,6 +36,11 @@ differences listed under **Changed**.
 
 ### Changed
 
+- The project now lives at [MaesterZ/readme-generator-for-helm](https://github.com/MaesterZ/readme-generator-for-helm):
+  Cozystack stopped using this generator in [cozystack#1218](https://github.com/cozystack/cozystack/pull/1218)
+  and the upstream no longer takes changes. The Go module path is now
+  `github.com/MaesterZ/readme-generator-for-helm`, so install with
+  `go install github.com/MaesterZ/readme-generator-for-helm@latest`.
 - The schema `default` for parameters with the `array` or `string` modifier is the real value from
   `values.yaml`; the README still shows the `[]` / `""` placeholder. The Node.js version writes
   the placeholders as strings (`"[]"`, `"\"\""`) and derives `items.type` from them, which makes
@@ -56,6 +61,6 @@ differences listed under **Changed**.
 
 - Initial Go rewrite of the Node.js readme-generator-for-helm, with the same command-line interface.
 
-[Unreleased]: https://github.com/cozystack/readme-generator-for-helm/compare/v1.0.1...HEAD
-[1.0.1]: https://github.com/cozystack/readme-generator-for-helm/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/cozystack/readme-generator-for-helm/releases/tag/v1.0.0
+[Unreleased]: https://github.com/MaesterZ/readme-generator-for-helm/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/MaesterZ/readme-generator-for-helm/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/MaesterZ/readme-generator-for-helm/releases/tag/v1.0.0
