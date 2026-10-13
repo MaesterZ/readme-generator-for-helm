@@ -471,16 +471,16 @@ func TestExecute(t *testing.T) {
 	}{
 		{"no arguments shows help", nil, 0, "At least one of --readme or --schema", ""},
 		{"short help", []string{"-h"}, 0, "Usage:", ""},
-		{"long help", []string{"--help"}, 0, "--values string", ""},
+		{"long help", []string{"--help"}, 0, "-v, --values  <file>", ""},
 		{"version", []string{"--version"}, 0, "Version: dev", ""},
 		{"unknown flag", []string{"--nope"}, exitUsage, "", "unknown flag: --nope"},
 		{"positional argument", []string{"-v", values, "-s", "x.json", "extra"}, exitUsage, "", `unexpected argument "extra"`},
 		{"single-dash long flag", []string{"-values", values}, exitUsage, "", "use --values instead of -values"},
 		{"single-dash version", []string{"-version"}, exitUsage, "", "use --version instead of -version"},
+		{"long flags with =", []string{"--values=" + values}, 1, "", "nothing to do"},
 		{"single-dash value is fine", []string{"-r", "-values"}, 1, "", "--values is required"},
 		{"missing values", []string{"-r", "README.md"}, 1, "", "--values is required"},
 		{"nothing to do", []string{"-v", values}, 1, "", "nothing to do"},
-		{"completion", []string{"completion", "bash"}, 0, "bash completion", ""},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

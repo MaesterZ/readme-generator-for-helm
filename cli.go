@@ -9,13 +9,30 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/spf13/cobra"
+	flag "github.com/spf13/pflag"
 )
 
 const cliName = "readme-generator-for-helm"
 
 // exitUsage is the exit code for invalid arguments, following the flag package convention.
 const exitUsage = 2
+
+// usage is printed for -h, --help and when no arguments are given.
+const usage = `Usage: readme-generator-for-helm [options]
+
+Options:
+  -v, --values  <file>   Path to the values.yaml file (required)
+  -r, --readme  <file>   Path to the README.md file to update
+  -c, --config  <file>   Path to config.json (optional; built-in defaults if omitted)
+  -s, --schema  <file>   Path for the generated OpenAPI Schema
+      --version          Print program version and exit
+  -h, --help             Show help
+
+At least one of --readme or --schema must be provided.
+
+Short flags take one dash (-v values.yaml), long flags two (--values values.yaml).
+Single-dash long flags such as -values are no longer accepted.
+`
 
 var (
 	// valueFlags take their value from the next argument unless written as --flag=value.
@@ -24,60 +41,40 @@ var (
 	longFlags = []string{"values", "readme", "config", "schema", "version", "help"}
 )
 
-func newRootCmd() *cobra.Command {
+// parseFlags parses the command-line arguments (without the program name) and reports whether --version
+// was given. It returns flag.ErrHelp when help is requested or no arguments are given.
+func parseFlags(args []string) (*options, bool, error) {
+	if len(args) == 0 {
+		return nil, false, flag.ErrHelp
+	}
+
 	opts := &options{}
 
-	cmd := &cobra.Command{
-		Use:   cliName,
-		Short: "Generate the Parameters table of a Helm chart README and its values schema",
-		Long: `Generate the Parameters table of a Helm chart README and its OpenAPI values schema
-from the @param metadata comments in values.yaml.
+	var showVersion bool
 
-At least one of --readme or --schema must be provided.
+	flags := flag.NewFlagSet(cliName, flag.ContinueOnError)
+	flags.SetOutput(io.Discard) // usage is printed by execute
+	flags.StringVarP(&opts.valuesPath, "values", "v", "", "")
+	flags.StringVarP(&opts.readmePath, "readme", "r", "", "")
+	flags.StringVarP(&opts.configPath, "config", "c", "", "")
+	flags.StringVarP(&opts.schemaPath, "schema", "s", "", "")
+	flags.BoolVar(&showVersion, "version", false, "")
 
-Short flags take one dash (-v values.yaml), long flags two (--values values.yaml).
-Single-dash long flags such as -values are no longer accepted.`,
-		Example:       "  " + cliName + " -v values.yaml -r README.md -s values.schema.json",
-		Version:       version,
-		Args:          noArgs,
-		SilenceErrors: true,
-		SilenceUsage:  true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if cmd.Flags().NFlag() == 0 {
-				return cmd.Help()
-			}
-
-			return run(opts)
-		},
+	err := flags.Parse(args)
+	if errors.Is(err, flag.ErrHelp) {
+		return nil, false, flag.ErrHelp
 	}
 
-	cmd.SetVersionTemplate("Version: {{.Version}}\n")
-	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
-		return fmt.Errorf("%w: %w", errInvalidFlags, err)
-	})
-
-	flags := cmd.Flags()
-	flags.StringVarP(&opts.valuesPath, "values", "v", "", "path to the values.yaml file (required)")
-	flags.StringVarP(&opts.readmePath, "readme", "r", "", "path to the README.md file to update")
-	flags.StringVarP(&opts.configPath, "config", "c", "", "path to config.json (built-in defaults if omitted)")
-	flags.StringVarP(&opts.schemaPath, "schema", "s", "", "path for the generated OpenAPI schema")
-
-	// Shell completion only suggests files with these extensions
-	_ = cmd.MarkFlagFilename("values", "yaml", "yml")
-	_ = cmd.MarkFlagFilename("readme", "md")
-	_ = cmd.MarkFlagFilename("config", "json")
-	_ = cmd.MarkFlagFilename("schema", "json")
-
-	return cmd
-}
-
-// noArgs rejects positional arguments, which were silently ignored before.
-func noArgs(_ *cobra.Command, args []string) error {
-	if len(args) > 0 {
-		return fmt.Errorf("%w: unexpected argument %q", errInvalidFlags, args[0])
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: %w", errInvalidFlags, err)
 	}
 
-	return nil
+	// Positional arguments used to be silently ignored
+	if flags.NArg() > 0 {
+		return nil, false, fmt.Errorf("%w: unexpected argument %q", errInvalidFlags, flags.Arg(0))
+	}
+
+	return opts, showVersion, nil
 }
 
 // run validates the options and generates the README and/or schema.
@@ -129,33 +126,40 @@ func checkSingleDashFlags(args []string) error {
 
 // execute runs the CLI with args (without the program name) and returns the process exit code.
 func execute(args []string, stdout, stderr io.Writer) int {
-	if args == nil {
-		args = []string{} // cobra falls back to os.Args on nil
-	}
-
-	cmd := newRootCmd()
-	cmd.SetArgs(args)
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
+	var (
+		opts        *options
+		showVersion bool
+	)
 
 	err := checkSingleDashFlags(args)
 	if err == nil {
-		err = cmd.Execute()
+		opts, showVersion, err = parseFlags(args)
 	}
 
 	switch {
-	case err == nil:
+	case errors.Is(err, flag.ErrHelp):
+		fmt.Fprint(stdout, usage)
+
 		return 0
-	case errors.Is(err, errInvalidFlags):
+	case err != nil:
 		fmt.Fprintln(stderr, err)
-		fmt.Fprint(stderr, "\n"+cmd.UsageString())
+		fmt.Fprint(stderr, "\n"+usage)
 
 		return exitUsage
-	default:
+	case showVersion:
+		fmt.Fprintln(stdout, "Version:", version)
+
+		return 0
+	}
+
+	err = run(opts)
+	if err != nil {
 		fmt.Fprintln(stderr, err)
 
 		return 1
 	}
+
+	return 0
 }
 
 func main() {
