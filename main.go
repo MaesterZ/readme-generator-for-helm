@@ -1,45 +1,35 @@
-// readme_generator.go
-// A Go re‑implementation of the Helm README & OpenAPI generator originally written in Node.js.
-// It preserves the same command‑line interface:
-//   -v|--values <values.yaml>
-//   -r|--readme <README.md>
-//   -c|--config <config.json>
-//   -s|--schema <schema.json>
-//   --version
+// Command readme-generator-for-helm is a Go rewrite of the Node.js Helm README & schema generator by Bitnami.
 //
-// The program parses metadata comments inside the Helm values.yaml, validates them, updates
-// the "## Parameters" section of the README with a Markdown table and optionally generates
-// an OpenAPI v3 schema describing the values.
+// It parses the metadata comments of a chart's values.yaml, checks them against the actual keys, then updates
+// the Parameters section of README.md with Markdown tables and/or writes a values.schema.json:
 //
-// Usage example:
-//      readme-generator -v values.yaml -r README.md -s values.schema.json
-//
-// The implementation tries to follow the structure of the original project while adopting
-// Go idioms.
-
+//	readme-generator-for-helm -v values.yaml -r README.md -s values.schema.json
 package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	yaml "go.yaml.in/yaml/v3"
 )
 
 //-------------------------------------------------------------------------
-// Version – overridden at build time with:  go build -ldflags "-X main.version=1.2.3"
+// Version – set by releases with -ldflags "-X main.version=1.2.3", else read from the build info (see versionString)
 //-------------------------------------------------------------------------
 
-var version = "dev"
+var version = ""
 
 // Value types as reported by JS typeof, plus the "nil" placeholder for YAML null.
 const (
@@ -62,6 +52,7 @@ var (
 	errSchemaConflict  = errors.New("conflicting schema definitions")
 	errNilValues       = errors.New("invalid type 'nil' for the following values")
 	errInvalidFlags    = errors.New("invalid arguments")
+	errModifier        = errors.New("invalid modifiers")
 )
 
 //-------------------------------------------------------------------------
@@ -73,6 +64,8 @@ type options struct {
 	readmePath string
 	configPath string
 	schemaPath string
+
+	configOptional bool // configPath is the default one and may not exist
 }
 
 //-------------------------------------------------------------------------
@@ -203,7 +196,8 @@ func defaultConfig() *Config {
 	return cfg
 }
 
-func loadConfig(path string) (*Config, error) {
+// loadConfig merges the config file at path over the defaults; a missing file is only an error if not optional.
+func loadConfig(path string, optional bool) (*Config, error) {
 	cfg := defaultConfig()
 
 	if path == "" {
@@ -212,14 +206,18 @@ func loadConfig(path string) (*Config, error) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if optional && errors.Is(err, fs.ErrNotExist) {
 			return cfg, nil
 		}
 
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
-	err = json.Unmarshal(data, cfg)
+	// Unknown fields are most likely typos that would silently fall back to the defaults
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+
+	err = dec.Decode(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
@@ -303,9 +301,7 @@ func createValuesObject(valuesPath string) ([]*Parameter, any, error) {
 		return nil, nil, fmt.Errorf("read values: %w", err)
 	}
 
-	var node any
-
-	err = yaml.Unmarshal(raw, &node)
+	node, err := decodeValues(raw)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse values %s: %w", valuesPath, err)
 	}
@@ -333,6 +329,50 @@ func createValuesObject(valuesPath string) ([]*Parameter, any, error) {
 	return params, node, nil
 }
 
+// decodeValues decodes YAML like the Node.js version: dates stay strings and map keys are always strings.
+func decodeValues(raw []byte) (any, error) {
+	var doc yaml.Node
+
+	err := yaml.Unmarshal(raw, &doc)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wrapped by the caller
+	}
+
+	if doc.Kind == 0 { // empty file
+		return nil, nil //nolint:nilnil // an empty file has no values
+	}
+
+	stringifyScalars(&doc)
+
+	var node any
+
+	err = doc.Decode(&node)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wrapped by the caller
+	}
+
+	return node, nil
+}
+
+// stringifyScalars retags timestamps and non-string map keys (80, true, ~) as strings.
+func stringifyScalars(node *yaml.Node) {
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!timestamp" {
+		node.Tag = "!!str"
+	}
+
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i < len(node.Content); i += 2 {
+			if key := node.Content[i]; key.Kind == yaml.ScalarNode && key.Tag != "!!merge" {
+				key.Tag = "!!str"
+			}
+		}
+	}
+
+	for _, child := range node.Content {
+		stringifyScalars(child)
+	}
+}
+
 func inferType(v any) string {
 	switch v.(type) {
 	case nil:
@@ -341,7 +381,7 @@ func inferType(v any) string {
 		return typeString
 	case bool:
 		return typeBoolean
-	case int, int64, float64:
+	case int, int64, uint, uint64, float64:
 		return typeNumber
 	case []any:
 		return typeArray
@@ -356,8 +396,9 @@ func inferType(v any) string {
 // utils helpers similar to lib/utils.js
 //-------------------------------------------------------------------------
 
+// getArrayPrefix returns path up to its last index, e.g. a[0].b for a[0].b[1].c
 func getArrayPrefix(path string) string {
-	prefix, _, _ := strings.Cut(path, "[")
+	prefix, _, _ := strings.CutLast(path, "[")
 
 	return prefix
 }
@@ -544,19 +585,48 @@ func checkKeys(values []*Parameter, meta []*Parameter) error {
 	orphan := difference(metaKeys, realKeys)  // present in metadata, absent in YAML
 
 	if len(missing) == 0 && len(orphan) == 0 {
-		fmt.Println("INFO: Metadata is correct!")
 		return nil
 	}
 
+	var lines strings.Builder
+
 	for _, key := range missing {
-		fmt.Printf("ERROR: Missing metadata for key: %s\n", key)
+		fmt.Fprintf(&lines, "\n  Missing metadata for key: %s", key)
 	}
 
 	for _, key := range orphan {
-		fmt.Printf("ERROR: Metadata provided for non existing key: %s\n", key)
+		fmt.Fprintf(&lines, "\n  Metadata provided for non existing key: %s", key)
 	}
 
-	return errMetadata
+	return fmt.Errorf("%w:%s", errMetadata, lines.String())
+}
+
+// checkModifiers rejects unknown and empty modifiers, which would otherwise be ignored and skip validation.
+func checkModifiers(meta []*Parameter, cfg *Config) error {
+	known := []string{cfg.Modifiers.Array, cfg.Modifiers.Object, cfg.Modifiers.String, cfg.Modifiers.Nullable}
+
+	var lines strings.Builder
+
+	for _, param := range meta {
+		for _, mod := range param.Modifiers {
+			if _, isDefault := defaultModifier(mod, cfg); isDefault || slices.Contains(known, mod) {
+				continue
+			}
+
+			if mod == "" {
+				fmt.Fprintf(&lines, "\n  Empty modifier for parameter: %s", param.Name)
+			} else {
+				fmt.Fprintf(&lines, "\n  Unknown modifier %q for parameter: %s", mod, param.Name)
+			}
+		}
+	}
+
+	if lines.Len() == 0 {
+		return nil
+	}
+
+	// A description starting with a Markdown link, e.g. [docs](url), is parsed as modifiers
+	return fmt.Errorf("%w:%s", errModifier, lines.String())
 }
 
 // skipChecker reports whether a key is under a @skip param or a param with modifiers, whose subtrees aren't validated.
@@ -631,25 +701,6 @@ func combineMetadataAndValues(values []*Parameter, meta []*Parameter) {
 
 				break
 			}
-		}
-	}
-
-	// Add skip parameters that are only in values (objects without @param)
-	for _, src := range values {
-		found := false
-
-		for _, p := range meta {
-			if p.Name == src.Name {
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			// Insert after the closest parent
-			np := *src
-			np.SetSkip(true)
-			meta = append(meta, &np)
 		}
 	}
 }
@@ -824,7 +875,7 @@ func markdownTable(params []*Parameter) (string, error) {
 	widths := make([]int, len(rows[0]))
 	for _, row := range rows {
 		for col, cell := range row {
-			widths[col] = max(widths[col], len(cell))
+			widths[col] = max(widths[col], cellWidth(cell))
 		}
 	}
 
@@ -873,10 +924,20 @@ func writeRow(out *strings.Builder, row []string, widths []int) {
 	out.WriteString("|")
 
 	for col, cell := range row {
-		out.WriteString(" " + cell + strings.Repeat(" ", widths[col]-len(cell)) + " |")
+		out.WriteString(" " + cell + strings.Repeat(" ", widths[col]-cellWidth(cell)) + " |")
 	}
 
 	out.WriteString("\n")
+}
+
+// cellWidth counts UTF-16 code units like JS string length, so non-ASCII tables are padded as by Node.js.
+func cellWidth(cell string) int {
+	width := 0
+	for _, r := range cell {
+		width += utf16.RuneLen(r)
+	}
+
+	return width
 }
 
 // jsonString encodes val like JS JSON.stringify, without escaping <, > and &.
@@ -1273,6 +1334,11 @@ func getParsedMetadata(valuesPath string, cfg *Config) (*Metadata, error) {
 		return nil, err
 	}
 
+	err = checkModifiers(meta.Parameters, cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	err = checkKeys(valuesObj, meta.Parameters)
 	if err != nil {
 		return nil, err
@@ -1288,8 +1354,9 @@ func getParsedMetadata(valuesPath string, cfg *Config) (*Metadata, error) {
 // runReadmeGenerator – public entry similar to JS runReadmeGenerator
 //-------------------------------------------------------------------------
 
-func runReadmeGenerator(opts *options) error {
-	cfg, err := loadConfig(opts.configPath)
+// runReadmeGenerator writes the README and/or schema, reporting progress to stdout.
+func runReadmeGenerator(opts *options, stdout io.Writer) error {
+	cfg, err := loadConfig(opts.configPath, opts.configOptional)
 	if err != nil {
 		return err
 	}
@@ -1298,6 +1365,8 @@ func runReadmeGenerator(opts *options) error {
 	if err != nil {
 		return err
 	}
+
+	fmt.Fprintln(stdout, "INFO: Metadata is correct!")
 
 	if opts.readmePath != "" {
 		for _, sec := range meta.Sections {
@@ -1309,7 +1378,7 @@ func runReadmeGenerator(opts *options) error {
 			return err
 		}
 
-		fmt.Println("README updated ✅")
+		fmt.Fprintln(stdout, "README updated ✅")
 	}
 
 	if opts.schemaPath != "" {
@@ -1320,7 +1389,7 @@ func runReadmeGenerator(opts *options) error {
 			return err
 		}
 
-		fmt.Println("Schema generated ✅")
+		fmt.Fprintln(stdout, "Schema generated ✅")
 	}
 
 	return nil

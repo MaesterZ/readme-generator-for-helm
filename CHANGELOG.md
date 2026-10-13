@@ -20,6 +20,10 @@ that Helm 3 and 4 accept, and passes golangci-lint with no issues.
 - `Makefile` with `build`, `release`, `test`, `lint`, `format`, `tidy` and `clean` targets, and a
   `.gitignore` for the binary and editor files.
 - Golden tests using the Node.js README fixtures, a schema golden file, and unit tests for each fix.
+- CI workflow running the tests (with `-race`), golangci-lint, and `make helm-lint` with Helm 3.22 and 4.3:
+  the schema generated for the `testdata/chart` fixture must pass `helm lint --strict`.
+- `--version` of a `go install` or `go build` binary reports the module version (e.g. `v1.1.0`)
+  instead of `dev`.
 
 ### Fixed
 
@@ -46,6 +50,22 @@ that Helm 3 and 4 accept, and passes golangci-lint with no issues.
   rendering an empty README cell.
 - An invalid `paramsSectionTitle` regexp in the config file is reported as an error instead of
   crashing.
+- Unknown modifiers (e.g. a typo like `[arrray]`) fail with `Unknown modifier "arrray" for parameter: a`,
+  as in the Node.js version. They used to be ignored, which skipped the validation of the key's subtree and
+  wrote `"type": ""` to the schema. This includes descriptions starting with a Markdown link, which
+  are parsed as modifiers.
+- A modifier on a nested array (`a[0].b[0].c`) only skips the validation of `a[0].b`, as in the
+  Node.js version, instead of all of `a`.
+- Unquoted dates (`date: 2001-12-14`) stay strings, as in the Node.js version, instead of being
+  rendered as `2001-12-14T00:00:00Z` with the invalid schema type `unknown`. Integers above the
+  int64 range get type `number`.
+- Non-string map keys (`ports: {80: http}`) are documented as `ports.80` instead of failing
+  with `Missing metadata for key: ports`.
+- A `--config` file that doesn't exist is an error instead of silently falling back to the defaults.
+  The `config.json` next to the binary is still optional.
+- README tables are padded by JS string length (UTF-16 code units) instead of bytes, so tables
+  with accents, CJK or emoji are aligned as by the Node.js version.
+- GoReleaser binaries are stripped again (`-s -w`): the custom `ldflags` replaced the defaults.
 
 ### Changed
 
@@ -67,6 +87,12 @@ that Helm 3 and 4 accept, and passes golangci-lint with no issues.
   Long flags need two dashes: `-values` is rejected with `use --values instead of -values` (Go's
   flag package used to accept it). Positional arguments, previously ignored, are rejected.
 - Error messages say which step failed, e.g. `read values: open values.yaml: no such file or directory`.
+- Metadata errors are printed to stderr, in the error that ends the run (`metadata errors found:`
+  followed by one line per key), instead of `ERROR:` lines on stdout.
+- Empty modifiers (`[string,]`) and unknown fields in the config file (e.g. `paramSectionTitle`)
+  are rejected; both used to be ignored. The Node.js version ignores them.
+- GoReleaser config moved to version 2, the workflow actions are pinned to commit SHAs, and the
+  release uses the Go version from `go.mod`.
 - Fixed all 294 golangci-lint findings, with no change to the generated README or schema:
   - errors are named or wrapped with context, and JSON encoding errors are no longer ignored;
   - the long parsing, rendering and schema functions are split into small helpers, and the

@@ -1,0 +1,44 @@
+## @section Common
+
+## @param nameOverride [string, nullable] Override the chart name
+nameOverride: null
+## @param replicaCount Number of replicas
+replicaCount: 1
+## @param releaseDate Release date, kept as a string
+releaseDate: 2026-01-15
+
+## @section Image
+
+## @param image.repository Image repository
+## @param image.tag Image tag
+## @param image.pullPolicy [default: IfNotPresent] Image pull policy
+image:
+  repository: nginx
+  tag: "1.27"
+  pullPolicy: IfNotPresent
+
+## @section Workload
+
+## @param args Container arguments
+args:
+  - --verbose
+  - --port=8080
+## @param env [array] Environment variables
+env:
+  - name: FOO
+    value: bar
+## @param jobs[0].name Job name
+## @param jobs[0].schedule Job schedule
+jobs:
+  - name: backup
+    schedule: "0 2 * * *"
+## @param ports.80 Name of port 80
+ports:
+  80: http
+## @param resources [object] Resource requests and limits
+resources: {}
+## @param podAnnotations.prometheus.io/scrape Scrape the pod
+podAnnotations:
+  prometheus.io/scrape: "true"
+## @param tolerations [array, nullable] Tolerations
+tolerations: null

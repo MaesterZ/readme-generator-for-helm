@@ -41,3 +41,10 @@ format:
 ## tidy| Go| Add missing and remove unused modules
 tidy:
 	go mod tidy
+
+.PHONY: helm-lint
+## helm-lint| Helm| Check that Helm accepts the schema generated for testdata/chart
+helm-lint:
+	@tmp=$$(mktemp -d) && cp -R testdata/chart/. $$tmp \
+		&& go run . -v $$tmp/values.yaml -s $$tmp/values.schema.json \
+		&& helm lint --strict $$tmp; rc=$$?; rm -rf $$tmp; exit $$rc

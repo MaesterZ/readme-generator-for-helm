@@ -52,3 +52,6 @@ gemini-debug.log
 .cursor/
 .cursor.json
 .cursor-settings.yaml
+
+# GoReleaser output
+dist/

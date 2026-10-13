@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 
@@ -23,7 +24,7 @@ const usage = `Usage: readme-generator-for-helm [options]
 Options:
   -v, --values  <file>   Path to the values.yaml file (required)
   -r, --readme  <file>   Path to the README.md file to update
-  -c, --config  <file>   Path to config.json (optional; built-in defaults if omitted)
+  -c, --config  <file>   Path to config.json (default: config.json next to the binary, if any)
   -s, --schema  <file>   Path for the generated OpenAPI Schema
       --version          Print program version and exit
   -h, --help             Show help
@@ -78,7 +79,7 @@ func parseFlags(args []string) (*options, bool, error) {
 }
 
 // run validates the options and generates the README and/or schema.
-func run(opts *options) error {
+func run(opts *options, stdout io.Writer) error {
 	if opts.valuesPath == "" {
 		return errValuesRequired
 	}
@@ -87,13 +88,17 @@ func run(opts *options) error {
 		return errNothingToDo
 	}
 
-	// Default config path next to executable
+	// Default to the config next to the executable, if there is one; else the built-in defaults
 	if opts.configPath == "" {
-		exe, _ := os.Executable()
-		opts.configPath = filepath.Join(filepath.Dir(exe), "config.json")
+		opts.configOptional = true
+
+		exe, err := os.Executable()
+		if err == nil {
+			opts.configPath = filepath.Join(filepath.Dir(exe), "config.json")
+		}
 	}
 
-	return runReadmeGenerator(opts)
+	return runReadmeGenerator(opts, stdout)
 }
 
 // checkSingleDashFlags rejects long flags written with one dash (-values), which Go's flag package
@@ -147,12 +152,12 @@ func execute(args []string, stdout, stderr io.Writer) int {
 
 		return exitUsage
 	case showVersion:
-		fmt.Fprintln(stdout, "Version:", version)
+		fmt.Fprintln(stdout, "Version:", versionString())
 
 		return 0
 	}
 
-	err = run(opts)
+	err = run(opts, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 
@@ -160,6 +165,19 @@ func execute(args []string, stdout, stderr io.Writer) int {
 	}
 
 	return 0
+}
+
+// versionString returns the release version, else the module version of a go install build, else "dev".
+func versionString() string {
+	if version != "" {
+		return version
+	}
+
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+
+	return "dev"
 }
 
 func main() {
