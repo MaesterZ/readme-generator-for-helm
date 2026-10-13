@@ -53,7 +53,7 @@ The top‑level heading (`## Parameters`, `### Parameters`, …) is detected d
 ### Using `go install` (recommended)
 
 ```console
-go install github.com/MaesterZ/readme-generator-for-helm@latest
+go install github.com/MaesterZ/readme-generator-for-helm/v2@latest
 ```
 
 The binary lands in `$(go env GOPATH)/bin` (usually `~/go/bin`). Make sure that directory is on your `$PATH`.
@@ -82,7 +82,7 @@ Usage: readme-generator-for-helm [options]
 Options:
   -v, --values  <file>   Path to the values.yaml file (required)
   -r, --readme  <file>   Path to the README.md file to update
-  -c, --config  <file>   Path to config.json (optional; built-in defaults if omitted)
+  -c, --config  <file>   Path to config.json (default: config.json next to the binary, if any)
   -s, --schema  <file>   Path for the generated OpenAPI Schema
       --version          Print program version and exit
   -h, --help             Show help
@@ -106,6 +106,9 @@ The comment syntax, tags and modifiers are preserved from the original project:
 * **Skip subtree:**  `## @skip full.key.path`
 * **Intermediate object description:** `## @extra full.key.path Description`
 
+Unknown or empty modifiers are rejected. A description can't start with `[`, since that is parsed as the
+modifier list: `## @param url [Link](https://…) text` fails with `Unknown modifier "Link"`.
+
 Supported modifiers (customisable via the config file):
 
 | Modifier        | Effect                                                                                     |
@@ -122,7 +125,7 @@ Supported modifiers (customisable via the config file):
 
 ## Configuration file
 
-If you need to change comment delimiters, tag names, or add custom modifiers, provide a JSON file via `--config`:
+If you need to change comment delimiters, tag names, or rename modifiers, provide a JSON file via `--config`:
 
 ```json
 {
@@ -146,7 +149,8 @@ If you need to change comment delimiters, tag names, or add custom modifiers, pr
 }
 ```
 
-Omit the flag entirely to use the built‑in defaults (same as above).
+Fields you leave out keep the defaults above; unknown fields (usually typos) are rejected, as is a `--config` file that
+doesn't exist. Without `--config`, a `config.json` next to the binary is used if there is one, else the built‑in defaults.
 
 ---
 

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: fixture
+description: Chart used by CI to check that Helm accepts the generated schema
+icon: https://helm.sh/img/helm.svg
+version: 0.1.0

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -22,6 +23,7 @@ func TestInferType(t *testing.T) {
 		{"bool", true, "boolean"},
 		{"int", 1, "number"},
 		{"int64", int64(1), "number"},
+		{"uint64", uint64(1), "number"},
 		{"float64", 1.5, "number"},
 		{"array", []any{1, 2}, "array"},
 		{"object", map[string]any{"a": 1}, "object"},
@@ -49,6 +51,7 @@ func TestGetArrayPrefix(t *testing.T) {
 		{"no brackets", "a.b.c", "a.b.c"},
 		{"single index", "a.b[0]", "a.b"},
 		{"index not at start", "a[0].b", "a"},
+		{"nested indexes", "a[0].b[1].c", "a[0].b"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -136,7 +139,7 @@ func runOn(t *testing.T, values, readme string, withSchema bool) (string, map[st
 		opts.schemaPath = filepath.Join(dir, "schema.json")
 	}
 
-	err := runReadmeGenerator(opts)
+	err := runReadmeGenerator(opts, io.Discard)
 	if err != nil {
 		return "", nil, err
 	}
@@ -221,7 +224,7 @@ func TestReadmeGolden(t *testing.T) {
 				opts.configPath = filepath.Join("testdata", testCase.config)
 			}
 
-			err := runReadmeGenerator(opts)
+			err := runReadmeGenerator(opts, io.Discard)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -376,7 +379,7 @@ func TestSchemaGolden(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "schema.json")
 	opts := &options{valuesPath: filepath.Join("testdata", "test-values.yaml"), schemaPath: out}
 
-	err := runReadmeGenerator(opts)
+	err := runReadmeGenerator(opts, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +438,7 @@ func TestSchemaNoHTMLEscape(t *testing.T) {
 
 	writeFile(t, values, "## @section S\n## @param a Use <name> & co\na: \"<b>\"\n")
 
-	err := runReadmeGenerator(&options{valuesPath: values, schemaPath: schema})
+	err := runReadmeGenerator(&options{valuesPath: values, schemaPath: schema}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,5 +535,100 @@ func TestExecuteGeneratesFiles(t *testing.T) {
 		if string(gotData) != string(wantData) {
 			t.Errorf("%s differs from %s", got, want)
 		}
+	}
+}
+
+func TestValidationErrors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ name, values, want string }{
+		{"missing metadata", "## @param a A\na: 1\nb: 2\n", "Missing metadata for key: b"},
+		{"orphan metadata", "## @param a A\n## @param b B\na: 1\n", "Metadata provided for non existing key: b"},
+		{"unknown modifier", "## @param a [arrray] A\na:\n  b: 1\n", `Unknown modifier "arrray" for parameter: a`},
+		{"description starting with a link", "## @param a [Link](https://x) A\na: 1\n", `Unknown modifier "Link" for parameter: a`},
+		{"empty modifier", "## @param a [string,] A\na: x\n", "Empty modifier for parameter: a"},
+		{"modifier on nested array", "## @param a[0].b[0].c [string] C\n## @param a[0].d D\na:\n  - b: [{c: x}]\n    d: 1\n    e: 2\n",
+			"Missing metadata for key: a[0].e"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, err := runOn(t, testCase.values, "", true)
+			if err == nil || !strings.Contains(err.Error(), testCase.want) {
+				t.Errorf("error = %v, want %q", err, testCase.want)
+			}
+		})
+	}
+}
+
+func TestYAMLScalars(t *testing.T) {
+	t.Parallel()
+
+	values := "## @section S\n## @param date D\n## @param big B\n## @param ports.80 P\ndate: 2001-12-14\nbig: 18446744073709551615\nports:\n  80: http\n"
+
+	readme, schema, err := runOn(t, values, "## Parameters\n", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !rowHas(readme, "date", "`2001-12-14`") || !rowHas(readme, "ports.80", "`http`") {
+		t.Errorf("unexpected README:\n%s", readme)
+	}
+
+	for key, want := range map[string]string{"date": "string", "big": "number"} {
+		if got := prop(t, schema, key)["type"]; got != want {
+			t.Errorf("%s type = %v, want %s", key, got, want)
+		}
+	}
+}
+
+func TestCellWidth(t *testing.T) {
+	t.Parallel()
+
+	// JS length: é and € count 1, 🚀 counts 2 (surrogate pair)
+	if got := cellWidth("é€🚀"); got != 4 {
+		t.Errorf("cellWidth = %d, want 4", got)
+	}
+}
+
+func TestLoadConfig(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing.json")
+	typo := filepath.Join(dir, "typo.json")
+	writeFile(t, typo, `{"regexp": {"paramSectionTitle": "X"}}`)
+
+	_, err := loadConfig(missing, true)
+	if err != nil {
+		t.Errorf("optional missing config: %v", err)
+	}
+
+	_, err = loadConfig(missing, false)
+	if err == nil {
+		t.Error("explicit missing config should fail")
+	}
+
+	_, err = loadConfig(typo, false)
+	if err == nil || !strings.Contains(err.Error(), `unknown field "paramSectionTitle"`) {
+		t.Errorf("unknown field error = %v", err)
+	}
+}
+
+func TestExecuteErrorsOnStderr(t *testing.T) {
+	t.Parallel()
+
+	values := filepath.Join(t.TempDir(), "values.yaml")
+	writeFile(t, values, "## @param a A\na: 1\nb: 2\n")
+
+	var stdout, stderr strings.Builder
+
+	if code := execute([]string{"-v", values, "-s", "x.json"}, &stdout, &stderr); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+
+	if stdout.String() != "" || !strings.Contains(stderr.String(), "Missing metadata for key: b") {
+		t.Errorf("stdout: %q\nstderr: %q", stdout.String(), stderr.String())
 	}
 }

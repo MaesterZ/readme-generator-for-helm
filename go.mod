@@ -1,4 +1,4 @@
-module github.com/MaesterZ/readme-generator-for-helm
+module github.com/MaesterZ/readme-generator-for-helm/v2
 
 go 1.27.0
 
