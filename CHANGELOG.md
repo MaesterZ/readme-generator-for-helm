@@ -14,8 +14,8 @@ that Helm 3 and 4 accept, and passes golangci-lint with no issues.
 
 ### Added
 
-- Running without arguments prints the help and exits 0, as `-h` / `--help` do; the help text
-  matches the README. Unknown flags print the error and the help to stderr and exit 2.
+- Running without arguments prints the help and exits 0, as `-h` / `--help` do. Invalid arguments
+  print the error and the usage to stderr and exit 2.
 - golangci-lint configuration (`.golangci.yml`): all linters enabled, minus a short disable list.
 - `Makefile` with `build`, `release`, `test`, `lint`, `format`, `tidy` and `clean` targets, and a
   `.gitignore` for the binary and editor files.
@@ -63,6 +63,9 @@ that Helm 3 and 4 accept, and passes golangci-lint with no issues.
 - Nullable parameters get `"type": ["<type>", "null"]` in the schema. Helm validates
   `values.schema.json` as JSON Schema, which ignores OpenAPI's `nullable` keyword, so `null` values
   previously failed `helm lint`. `nullable: true` is still emitted for OpenAPI consumers.
+- Flags are parsed with [pflag](https://github.com/spf13/pflag), GNU-style as in the Node.js version.
+  Long flags need two dashes: `-values` is rejected with `use --values instead of -values` (Go's
+  flag package used to accept it). Positional arguments, previously ignored, are rejected.
 - Error messages say which step failed, e.g. `read values: open values.yaml: no such file or directory`.
 - Fixed all 294 golangci-lint findings, with no change to the generated README or schema:
   - errors are named or wrapped with context, and JSON encoding errors are no longer ignored;

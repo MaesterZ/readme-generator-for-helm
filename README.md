@@ -88,7 +88,12 @@ Options:
   -h, --help             Show help
 
 At least one of --readme or --schema must be provided.
+
+Short flags take one dash (-v values.yaml), long flags two (--values values.yaml).
+Single-dash long flags such as -values are no longer accepted.
 ```
+
+Positional arguments are rejected.
 
 ---
 

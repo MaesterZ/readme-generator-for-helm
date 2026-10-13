@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
-	"flag"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -459,35 +457,80 @@ func rowHas(readme, key, want string) bool {
 	return false
 }
 
-func TestParseFlags(t *testing.T) {
+func TestExecute(t *testing.T) {
 	t.Parallel()
 
+	values := filepath.Join("testdata", "test-values.yaml")
+
 	cases := []struct {
-		name    string
-		args    []string
-		wantErr error
+		name       string
+		args       []string
+		wantCode   int
+		wantStdout string // substring, "" to skip
+		wantStderr string
 	}{
-		{"no arguments shows help", nil, flag.ErrHelp},
-		{"short help", []string{"-h"}, flag.ErrHelp},
-		{"long help", []string{"--help"}, flag.ErrHelp},
-		{"unknown flag", []string{"--nope"}, errInvalidFlags},
-		{"missing values", []string{"-r", "README.md"}, errValuesRequired},
-		{"nothing to do", []string{"-v", "values.yaml"}, errNothingToDo},
-		{"version", []string{"--version"}, nil},
-		{"readme", []string{"--values", "values.yaml", "-r", "README.md"}, nil},
+		{"no arguments shows help", nil, 0, "At least one of --readme or --schema", ""},
+		{"short help", []string{"-h"}, 0, "Usage:", ""},
+		{"long help", []string{"--help"}, 0, "-v, --values  <file>", ""},
+		{"version", []string{"--version"}, 0, "Version: dev", ""},
+		{"unknown flag", []string{"--nope"}, exitUsage, "", "unknown flag: --nope"},
+		{"positional argument", []string{"-v", values, "-s", "x.json", "extra"}, exitUsage, "", `unexpected argument "extra"`},
+		{"single-dash long flag", []string{"-values", values}, exitUsage, "", "use --values instead of -values"},
+		{"single-dash version", []string{"-version"}, exitUsage, "", "use --version instead of -version"},
+		{"long flags with =", []string{"--values=" + values}, 1, "", "nothing to do"},
+		{"single-dash value is fine", []string{"-r", "-values"}, 1, "", "--values is required"},
+		{"missing values", []string{"-r", "README.md"}, 1, "", "--values is required"},
+		{"nothing to do", []string{"-v", values}, 1, "", "nothing to do"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			opts, err := parseFlags(testCase.args)
-			if !errors.Is(err, testCase.wantErr) {
-				t.Fatalf("parseFlags(%q) error = %v, want %v", testCase.args, err, testCase.wantErr)
+			var stdout, stderr strings.Builder
+
+			code := execute(testCase.args, &stdout, &stderr)
+			if code != testCase.wantCode {
+				t.Errorf("exit code = %d, want %d\nstdout: %s\nstderr: %s", code, testCase.wantCode, stdout.String(), stderr.String())
 			}
 
-			if testCase.wantErr == nil && opts == nil {
-				t.Errorf("parseFlags(%q) returned no options", testCase.args)
+			if !strings.Contains(stdout.String(), testCase.wantStdout) {
+				t.Errorf("stdout missing %q:\n%s", testCase.wantStdout, stdout.String())
+			}
+
+			if !strings.Contains(stderr.String(), testCase.wantStderr) {
+				t.Errorf("stderr missing %q:\n%s", testCase.wantStderr, stderr.String())
 			}
 		})
+	}
+}
+
+func TestExecuteGeneratesFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	readme := filepath.Join(dir, "README.md")
+	schema := filepath.Join(dir, "schema.json")
+
+	input, err := os.ReadFile(filepath.Join("testdata", "test-readme.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, readme, string(input))
+
+	var stdout, stderr strings.Builder
+
+	args := []string{"--values=" + filepath.Join("testdata", "test-values.yaml"), "-r", readme, "--schema", schema}
+	if code := execute(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
+	}
+
+	for got, want := range map[string]string{readme: "expected-readme.md", schema: "expected-schema.json"} {
+		gotData, _ := os.ReadFile(got)
+
+		wantData, _ := os.ReadFile(filepath.Join("testdata", want))
+		if string(gotData) != string(wantData) {
+			t.Errorf("%s differs from %s", got, want)
+		}
 	}
 }
