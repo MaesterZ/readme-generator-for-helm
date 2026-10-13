@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-10-13
 
 First release of the fork. The Go rewrite reaches parity with the Node.js
 [readme-generator-for-helm](https://github.com/bitnami/readme-generator-for-helm) on its own test fixtures
@@ -72,8 +72,8 @@ that Helm 3 and 4 accept, and passes golangci-lint with no issues.
 - The project now lives at [MaesterZ/readme-generator-for-helm](https://github.com/MaesterZ/readme-generator-for-helm):
   Cozystack stopped using this generator in [cozystack#1218](https://github.com/cozystack/cozystack/pull/1218)
   and the upstream no longer takes changes. The Go module path is now
-  `github.com/MaesterZ/readme-generator-for-helm`, so install with
-  `go install github.com/MaesterZ/readme-generator-for-helm@latest`.
+  `github.com/MaesterZ/readme-generator-for-helm/v2` (major version 2), so install with
+  `go install github.com/MaesterZ/readme-generator-for-helm/v2@latest`.
 - Require Go 1.27 and switch from the archived `gopkg.in/yaml.v3` to its maintained successor
   `go.yaml.in/yaml/v3` (v3.0.5, same API).
 - The schema `default` for parameters with the `array` or `string` modifier is the real value from
@@ -112,6 +112,7 @@ that Helm 3 and 4 accept, and passes golangci-lint with no issues.
 
 - Initial Go rewrite of the Node.js readme-generator-for-helm, with the same command-line interface.
 
-[Unreleased]: https://github.com/MaesterZ/readme-generator-for-helm/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/MaesterZ/readme-generator-for-helm/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/MaesterZ/readme-generator-for-helm/compare/v1.0.1...v2.0.0
 [1.0.1]: https://github.com/MaesterZ/readme-generator-for-helm/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/MaesterZ/readme-generator-for-helm/releases/tag/v1.0.0

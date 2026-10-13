@@ -53,7 +53,7 @@ The top‑level heading (`## Parameters`, `### Parameters`, …) is detected d
 ### Using `go install` (recommended)
 
 ```console
-go install github.com/MaesterZ/readme-generator-for-helm@latest
+go install github.com/MaesterZ/readme-generator-for-helm/v2@latest
 ```
 
 The binary lands in `$(go env GOPATH)/bin` (usually `~/go/bin`). Make sure that directory is on your `$PATH`.
