@@ -77,18 +77,46 @@ go build -o readme-generator-for-helm
 Run it without arguments (or with `-h`) to print the help:
 
 ```console
-Usage: readme-generator-for-helm [options]
-
-Options:
-  -v, --values  <file>   Path to the values.yaml file (required)
-  -r, --readme  <file>   Path to the README.md file to update
-  -c, --config  <file>   Path to config.json (optional; built-in defaults if omitted)
-  -s, --schema  <file>   Path for the generated OpenAPI Schema
-      --version          Print program version and exit
-  -h, --help             Show help
+Generate the Parameters table of a Helm chart README and its OpenAPI values schema
+from the @param metadata comments in values.yaml.
 
 At least one of --readme or --schema must be provided.
+
+Short flags take one dash (-v values.yaml), long flags two (--values values.yaml).
+Single-dash long flags such as -values are no longer accepted.
+
+Usage:
+  readme-generator-for-helm [flags]
+
+Examples:
+  readme-generator-for-helm -v values.yaml -r README.md -s values.schema.json
+
+Flags:
+  -c, --config string   path to config.json (built-in defaults if omitted)
+  -h, --help            help for readme-generator-for-helm
+  -r, --readme string   path to the README.md file to update
+  -s, --schema string   path for the generated OpenAPI schema
+  -v, --values string   path to the values.yaml file (required)
+      --version         version for readme-generator-for-helm
 ```
+
+Positional arguments are rejected.
+
+### Shell completion
+
+Completion scripts for bash, zsh, fish and PowerShell suggest files with the right extension for
+each flag (`.yaml`/`.yml`, `.md`, `.json`):
+
+```console
+# bash
+source <(readme-generator-for-helm completion bash)
+# zsh
+readme-generator-for-helm completion zsh > "${fpath[1]}/_readme-generator-for-helm"
+# fish
+readme-generator-for-helm completion fish | source
+```
+
+Run `readme-generator-for-helm completion <shell> --help` for permanent installation instructions.
 
 ---
 

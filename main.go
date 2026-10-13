@@ -23,11 +23,9 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -75,72 +73,6 @@ type options struct {
 	readmePath string
 	configPath string
 	schemaPath string
-	version    bool
-}
-
-// usage is printed for -h, --help and when no arguments are given.
-const usage = `Usage: readme-generator-for-helm [options]
-
-Options:
-  -v, --values  <file>   Path to the values.yaml file (required)
-  -r, --readme  <file>   Path to the README.md file to update
-  -c, --config  <file>   Path to config.json (optional; built-in defaults if omitted)
-  -s, --schema  <file>   Path for the generated OpenAPI Schema
-      --version          Print program version and exit
-  -h, --help             Show help
-
-At least one of --readme or --schema must be provided.
-`
-
-// parseFlags parses the command-line arguments (without the program name).
-// It returns flag.ErrHelp when help is requested or no arguments are given.
-func parseFlags(args []string) (*options, error) {
-	opts := &options{}
-
-	flags := flag.NewFlagSet("readme-generator-for-helm", flag.ContinueOnError)
-	flags.SetOutput(io.Discard) // usage is printed by main
-	flags.StringVar(&opts.valuesPath, "values", "", "")
-	flags.StringVar(&opts.valuesPath, "v", "", "")
-	flags.StringVar(&opts.readmePath, "readme", "", "")
-	flags.StringVar(&opts.readmePath, "r", "", "")
-	flags.StringVar(&opts.configPath, "config", "", "")
-	flags.StringVar(&opts.configPath, "c", "", "")
-	flags.StringVar(&opts.schemaPath, "schema", "", "")
-	flags.StringVar(&opts.schemaPath, "s", "", "")
-	flags.BoolVar(&opts.version, "version", false, "")
-
-	if len(args) == 0 {
-		return nil, flag.ErrHelp
-	}
-
-	err := flags.Parse(args)
-	if errors.Is(err, flag.ErrHelp) {
-		return nil, flag.ErrHelp
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errInvalidFlags, err)
-	}
-
-	if opts.version {
-		return opts, nil
-	}
-
-	if opts.valuesPath == "" {
-		return nil, errValuesRequired
-	}
-
-	if opts.readmePath == "" && opts.schemaPath == "" {
-		return nil, errNothingToDo
-	}
-
-	// Default config path next to executable
-	if opts.configPath == "" {
-		exe, _ := os.Executable()
-		opts.configPath = filepath.Join(filepath.Dir(exe), "config.json")
-	}
-
-	return opts, nil
 }
 
 //-------------------------------------------------------------------------
@@ -1357,11 +1289,6 @@ func getParsedMetadata(valuesPath string, cfg *Config) (*Metadata, error) {
 //-------------------------------------------------------------------------
 
 func runReadmeGenerator(opts *options) error {
-	if opts.version {
-		fmt.Println("Version:", version)
-		return nil
-	}
-
 	cfg, err := loadConfig(opts.configPath)
 	if err != nil {
 		return err
@@ -1397,31 +1324,4 @@ func runReadmeGenerator(opts *options) error {
 	}
 
 	return nil
-}
-
-//-------------------------------------------------------------------------
-// main
-//-------------------------------------------------------------------------
-
-func main() {
-	opts, err := parseFlags(os.Args[1:])
-
-	switch {
-	case errors.Is(err, flag.ErrHelp):
-		fmt.Print(usage)
-		os.Exit(0)
-	case errors.Is(err, errInvalidFlags):
-		fmt.Fprintln(os.Stderr, err)
-		fmt.Fprint(os.Stderr, "\n"+usage)
-		os.Exit(2) //nolint:mnd // flag package convention for usage errors
-	case err != nil:
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
-	err = runReadmeGenerator(opts)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
 }
