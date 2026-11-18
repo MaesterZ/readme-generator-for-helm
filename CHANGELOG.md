@@ -15,8 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Golden test of YAML edge cases (folded and literal strings, anchors, octal and hex, big integers, YAML 1.1
   booleans, timestamps, `!!str` tags, ...) against the README written by the Node.js version 3.0.1.
 - Tests pinning the two YAML behaviours that deliberately differ from the Node.js version, now documented in the
-  README: `017` is read as octal `15` (YAML 1.1, like Helm) instead of `17`, and merge keys (`<<: *anchor`) are
-  resolved instead of failing with `Missing metadata for key: merged.<<.a`.
+  README: `017` is read as octal `15` instead of `17`, and merge keys (`<<: *anchor`) are resolved instead of
+  failing with `Missing metadata for key: merged.<<.a`. Both are YAML 1.1 rules that the Go YAML library keeps, as
+  Helm does.
+
+### Changed
+
+- Bump `github.com/spf13/pflag` from v1.0.10 to v1.1.0 and `go.yaml.in/yaml/v3` from v3.0.5 to v3.0.6. The help,
+  error messages, README and schema output are unchanged.
 
 ## [2.0.0] - 2026-10-13
 
