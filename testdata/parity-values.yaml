@@ -1,0 +1,49 @@
+## @section Edge cases
+## @param pipe Description with | pipe and `code` and ünïcödé 日本 🎉
+pipe: "a|b"
+## @param multiline Folded string
+multiline: >
+  line one
+  line two
+## @param literal Literal string
+literal: |
+  first
+  second
+## @param anchors.base Anchor base
+## @param anchors.ref Alias
+anchors:
+  base: &x hello
+  ref: *x
+## @param date Unquoted date
+date: 2001-12-14
+## @param octal Octal-ish
+octal: 0o17
+## @param hex Hex
+hex: 0x1F
+## @param bigint Big int
+bigint: 123456789012345678901234567890
+## @param float Float
+float: 1.0e+3
+## @param yesno YAML 1.1 bool
+yesno: yes
+## @param tilde [nullable] Null tilde
+tilde: ~
+## @param emptystr Empty string
+emptystr: ""
+## @param emptylist [array] Empty list
+emptylist: []
+## @param emptymap [object] Empty map
+emptymap: {}
+## @param strs Only strings
+strs: [--foo, --bar]
+## @param objs[0].name Object array
+objs:
+  - name: a
+## @param timestamp Timestamp
+timestamp: 2001-12-14t21:59:43.10-05:00
+## @param tagged Explicit str tag
+tagged: !!str 123
+## @param negzero Negative zero
+negzero: -0
+## @param inf Leading dot
+inf: .5

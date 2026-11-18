@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Parity with the Node.js [readme-generator-for-helm 3.0.1](https://github.com/bitnami/readme-generator-for-helm/releases/tag/3.0.1)
+  is verified. 3.x only moved the Node.js code to ES modules and bumped its dependencies (`markdown-table` 3,
+  `yaml` 2.9), and its README and schema output is byte-identical to 2.8.1, so the Go code is unchanged.
+- Golden test of YAML edge cases (folded and literal strings, anchors, octal and hex, big integers, YAML 1.1
+  booleans, timestamps, `!!str` tags, ...) against the README written by the Node.js version 3.0.1.
+- Tests pinning the two YAML behaviours that deliberately differ from the Node.js version, now documented in the
+  README: `017` is read as octal `15` (YAML 1.1, like Helm) instead of `17`, and merge keys (`<<: *anchor`) are
+  resolved instead of failing with `Missing metadata for key: merged.<<.a`.
+
 ## [2.0.0] - 2026-10-13
 
 First release of the fork. The Go rewrite reaches parity with the Node.js

@@ -13,6 +13,13 @@ Cozystack stopped using this generator in [#1218](https://github.com/cozystack/c
 
 Both features behave *exactly* like the original Bitnami tool, so you can switch by merely replacing the binary in your pipeline.
 
+Parity is checked against the Node.js version **3.0.1**. Besides the schema changes listed in the
+[CHANGELOG](CHANGELOG.md), `values.yaml` is parsed as YAML 1.1, like Helm does, where the Node.js version uses
+YAML 1.2:
+
+* numbers with a leading zero are octal: `017` is documented as `15`, not `17`;
+* merge keys (`<<: *anchor`) are resolved, where the Node.js version fails with `Missing metadata for key: …<<…`.
+
 ---
 
 ## How it works
